@@ -6,6 +6,7 @@ import json
 
 from pprint import pprint
 
+
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
         joke = get_random_joke()
@@ -34,7 +35,6 @@ class BuildAJokeHandler(tornado.web.RequestHandler):
             else:
                 break
 
-
         print(new_joke)
         self.write(new_joke)
 
@@ -50,10 +50,13 @@ def get_random_joke():
     r = requests.get("https://icanhazdadjoke.com/", headers=headers)
     return r.text
 
+
 def get_list_of_jokes():
     headers = {'user-agent': 'ewehner', 'Accept': 'application/json'}
     payload = {"limit": "30", "page": "1"}
-    r = requests.get("https://icanhazdadjoke.com/search", headers=headers, params=payload)
+    r = requests.get("https://icanhazdadjoke.com/search",
+                     headers=headers,
+                     params=payload)
 
     jokes = r.json()['results']
 
