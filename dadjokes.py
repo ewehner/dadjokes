@@ -3,7 +3,7 @@ import tornado.ioloop
 import requests
 import logging
 import re
-
+import random
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
@@ -19,6 +19,7 @@ class MainHandler(tornado.web.RequestHandler):
         headers = {'user-agent': 'ewehner', 'Accept': 'text/plain'}
         r = requests.get("https://icanhazdadjoke.com/", headers=headers)
         return r.text
+
 
 class BuildAJokeHandler(tornado.web.RequestHandler):
     def get(self):
@@ -39,6 +40,7 @@ class BuildAJokeHandler(tornado.web.RequestHandler):
 
         print(new_joke)
         self.write(new_joke)
+
 
 class ListHandler(tornado.web.RequestHandler):
     def get(self):
@@ -62,10 +64,16 @@ class JokeMakerHandler(tornado.web.RequestHandler):
     def get(self):
         jokes = self.get_list_of_jokes()
 
-        self.find_markov_choices(jokes)
+        start_words, end_words = get_beginning_and_end_words(jokes)
+
+        markov_map = self.find_markov_choices(jokes)
         # self.render('list.html', title="All the Dad Jokes!", items=jokes)
 
+        new_joke = self.build_joke(markov_map)
+
     def find_markov_choices(self, joke_list):
+
+        self.render('list.html', title="Woo Dad Jokes!", items=joke_list)
 
         # split jokes into individual words
         words = []
@@ -74,9 +82,13 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
         # get all the end of sentence words
         end_words = []
+        index = 0
         for word in words:
-            if word[-1] in ['.', '!', '?'] and word != '.':
-                end_words.append(word)
+            if word[-1] in ['.', '!', '?']:
+                words.insert(index + 1, 'blerp')
+                if word != '.':
+                    end_words.append(word)
+            index += 1
 
         trimmed_words = []
         for word in words:
@@ -84,28 +96,59 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
         # create a dict with unique keys mapped to a list of choices
         word_map = dict.fromkeys(trimmed_words, [])
-        print(word_map.items())
 
         for key, choices in word_map.items():
             locations = [i for i, j in enumerate(trimmed_words) if j == key]
-            # print("key: ", key, "  locations: ", locations)
+            temp = []
             for i in locations:
-                if i + 1 < len(trimmed_words):
-                    word_map[key].append(trimmed_words[i+1])
-            # print("word: ", key, " choices: ", word_map[key])
+                if i + 1 < len(trimmed_words) and trimmed_words[i + 1] != 'blerp':
+                    temp.append(trimmed_words[i + 1])
+            word_map[key] = temp
+
+        return word_map
+
+    def build_joke(self, markov_map):
+
+        start_words = {key: choices for key, choices in markov_map.items() if len(choices) > 0}
+
+        # for key, choices in start_words.items():
+        #     print(key, choices)
+
+        new_joke = ''
+        current_word = random.choice(list(start_words.keys()))
+        new_joke += current_word + ' '
+
+        while True:
+            choices = list(markov_map[current_word])
+            if not choices:
+                break
+            next_word = random.choice(choices)
+            print(next_word)
+            current_word = next_word
+            new_joke += next_word + ' '
 
 
-        # smoosh all the joke words together: DONE
-    #     then separate them into a big list of words DONE
-    #       then for each word find all instances. Then choose the following word for each, and store them associated with that word. stash them in redis.
+        print(new_joke)
+
+
+    def get_beginning_and_end_words(self, jokes):
+        beginnings = ''
+        endings = ''
+
+        for joke in jokes:
+            words = joke.split()
+            beginnings.append(words[0])
+            endings.append(words[-1])
+
+        return beginnings, endings
 
     def get_list_of_jokes(self):
 
         headers = {'user-agent': 'ewehner', 'Accept': 'application/json'}
         payload = {"limit": "30", "page": 1}
         r = requests.get("https://icanhazdadjoke.com/search",
-                     headers=headers,
-                     params=payload)
+                         headers=headers,
+                         params=payload)
         total_num_jokes = r.json()['total_jokes']
         print("total number of jokes = ", total_num_jokes)
 
@@ -114,7 +157,6 @@ class JokeMakerHandler(tornado.web.RequestHandler):
         page = 2
 
         while (len(results) < total_num_jokes):
-
             payload = {"limit": "30", "page": page}
             r = requests.get("https://icanhazdadjoke.com/search",
                              headers=headers,
