@@ -10,6 +10,10 @@ requests = "*"
 tornado = "*"
 pprint = "*"
 pycodestyle = "*"
+pip = "*"
+install = "*"
+redis = "*"
+re = "*"
 
 [requires]
 python_version = "3.7"
