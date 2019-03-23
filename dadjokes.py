@@ -61,19 +61,22 @@ class ListHandler(tornado.web.RequestHandler):
 
 
 class JokeMakerHandler(tornado.web.RequestHandler):
+
     def get(self):
-        jokes = self.get_list_of_jokes()
+        self.jokes = self.get_list_of_jokes()
 
-        start_words, end_words = get_beginning_and_end_words(jokes)
+        self.start_words, self.end_words = self.get_beginning_and_end_words(self.jokes)
 
-        markov_map = self.find_markov_choices(jokes)
-        # self.render('list.html', title="All the Dad Jokes!", items=jokes)
+        markov_map = self.find_markov_choices(self.jokes)
 
         new_joke = self.build_joke(markov_map)
 
+        self.render('joke.html', title="All the Dad Jokes!", joke=new_joke)
+
+
     def find_markov_choices(self, joke_list):
 
-        self.render('list.html', title="Woo Dad Jokes!", items=joke_list)
+        # self.render('list.html', title="Woo Dad Jokes!", items=joke_list)
 
         # split jokes into individual words
         words = []
@@ -109,31 +112,34 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
     def build_joke(self, markov_map):
 
-        start_words = {key: choices for key, choices in markov_map.items() if len(choices) > 0}
+        # start_words = {key: choices for key, choices in markov_map.items() if len(choices) > 0}
 
         # for key, choices in start_words.items():
         #     print(key, choices)
 
+
+
         new_joke = ''
-        current_word = random.choice(list(start_words.keys()))
+        current_word = random.choice(self.start_words)
         new_joke += current_word + ' '
 
         while True:
             choices = list(markov_map[current_word])
             if not choices:
+                # or current_word in self.end_words:
                 break
             next_word = random.choice(choices)
-            print(next_word)
             current_word = next_word
             new_joke += next_word + ' '
 
+        print("new joke: ", new_joke)
 
-        print(new_joke)
+        return new_joke
 
 
     def get_beginning_and_end_words(self, jokes):
-        beginnings = ''
-        endings = ''
+        beginnings = []
+        endings = []
 
         for joke in jokes:
             words = joke.split()
