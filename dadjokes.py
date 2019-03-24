@@ -8,12 +8,10 @@ import redis
 import json
 
 
-class MainHandler(tornado.web.RequestHandler):
+class RealJokeHandler(tornado.web.RequestHandler):
+    # Returns a random, actual Dad joke
     def get(self):
         joke = self.get_random_joke()
-
-        # output to console
-        print(joke)
 
         # output to webpage
         self.write(joke)
@@ -24,47 +22,23 @@ class MainHandler(tornado.web.RequestHandler):
         return r.text
 
 
-class BuildAJokeHandler(tornado.web.RequestHandler):
-    def get(self):
-        new_joke = ''
-        step = 0
-
-        while (True):
-
-            joke = get_random_joke().lower()
-            joke_words = joke.split()
-            print(joke_words)
-
-            if step < len(joke_words):
-                new_joke += joke_words[step] + ' '
-                step += 1
-            else:
-                break
-
-        print(new_joke)
-        self.write(new_joke)
-
-
 class ListHandler(tornado.web.RequestHandler):
+    # Returns a list of all (real) Dad jokes
     def get(self):
-        jokes = self.get_page_of_jokes()
-        self.render('list.html', title="Woo Dad Jokes!", items=jokes)
+        r = redis.Redis(host='localhost', port=6379)
+        r.flushall()
 
-    def get_page_of_jokes(limit=30, page=1):
-        headers = {'user-agent': 'ewehner', 'Accept': 'application/json'}
-        payload = {"limit": limit, "page": page}
+        if r.exists('joke_list'):
+            joke_list = json.loads(r.get('joke_list'))
+        else:
+            joke_list = get_list_of_jokes()
+            r.set('joke_list', json.dumps('joke_list'))
 
-        r = requests.get("https://icanhazdadjoke.com/search",
-                         headers=headers,
-                         params=payload)
-        jokes = r.json()['results']
-        lotsa_jokes = list(map(lambda x: x['joke'], jokes))
-
-        return lotsa_jokes
+        self.render('list.html', title="Woo Dad Jokes!", items=joke_list)
 
 
 class JokeMakerHandler(tornado.web.RequestHandler):
-
+    # Creates a markov-generated Dad joke
     def get(self):
         r = redis.Redis(host='localhost', port=6379)
 
@@ -76,7 +50,7 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
         # if it doesn't, build the markov map and other data, and stash it in redis for later
         else:
-            self.jokes = self.get_list_of_jokes()
+            self.jokes = get_list_of_jokes()
             r.set('joke_list', json.dumps(self.jokes))
 
             self.start_words, self.end_words = self.get_beginning_and_end_words(self.jokes)
@@ -104,6 +78,7 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
         for word in words:
             if word[-1] in ['.', '!', '?']:
+                # blerp marks the end of a joke
                 words.insert(index + 1, 'blerp')
             index += 1
             trimmed_words.append(re.sub(r'[^\w\s]', '', word))
@@ -120,6 +95,7 @@ class JokeMakerHandler(tornado.web.RequestHandler):
             locations = [i for i, j in enumerate(trimmed_words) if j == key]
             temp = []
             for i in locations:
+                # map word choices except end words --> words that start the next joke
                 if i + 1 < len(trimmed_words) and trimmed_words[i + 1] != 'blerp':
                     temp.append(trimmed_words[i + 1])
             word_map[key] = temp
@@ -128,27 +104,18 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
     def build_joke(self, markov_map):
 
-        # start_words = {key: choices for key, choices in markov_map.items() if len(choices) > 0}
-
-        # for key, choices in start_words.items():
-        #     print(key, choices)
-
-
-
         new_joke = ''
         current_word = random.choice(self.start_words)
         new_joke += current_word + ' '
 
+        # Add words until you hit an end word (one with no associated choices)
         while True:
             choices = list(markov_map[current_word])
             if not choices:
-                # or current_word in self.end_words:
                 break
             next_word = random.choice(choices)
             current_word = next_word
             new_joke += next_word + ' '
-
-        print("new joke: ", new_joke)
 
         return new_joke
 
@@ -164,40 +131,40 @@ class JokeMakerHandler(tornado.web.RequestHandler):
 
         return beginnings, endings
 
-    def get_list_of_jokes(self):
+def get_list_of_jokes():
+    # Gets a list of all the jokes -- used by both handler classes above
+    headers = {'user-agent': 'ewehner', 'Accept': 'application/json'}
+    payload = {"limit": "30", "page": 1}
+    resp = requests.get("https://icanhazdadjoke.com/search",
+                     headers=headers,
+                     params=payload)
+    total_num_jokes = resp.json()['total_jokes']
 
-        headers = {'user-agent': 'ewehner', 'Accept': 'application/json'}
-        payload = {"limit": "30", "page": 1}
-        r = requests.get("https://icanhazdadjoke.com/search",
+    results = resp.json()['results']
+
+    page = 2
+
+    while (len(results) < total_num_jokes):
+        payload = {"limit": "30", "page": page}
+        resp = requests.get("https://icanhazdadjoke.com/search",
                          headers=headers,
                          params=payload)
-        total_num_jokes = r.json()['total_jokes']
-        print("total number of jokes = ", total_num_jokes)
+        results += (resp.json()['results'])
 
-        results = r.json()['results']
+        page += 1
 
-        page = 2
+        joke_list = list(each['joke'] for each in results)
 
-        while (len(results) < total_num_jokes):
-            payload = {"limit": "30", "page": page}
-            r = requests.get("https://icanhazdadjoke.com/search",
-                             headers=headers,
-                             params=payload)
-            results += (r.json()['results'])
-
-            page += 1
-
-        jokes = list(each['joke'] for each in results)
-
-        return jokes
+        return joke_list
 
 
 if __name__ == "__main__":
     static_url_prefix = "/static/"
+
     dad_jokes = tornado.web.Application([
         (r"/", JokeMakerHandler),
-        (r"/markov.*", JokeMakerHandler),
-        (r"/list.*", ListHandler)
+        (r"/list.*", ListHandler),
+        (r"/real.*", RealJokeHandler)
     ], debug=True)
 
     logging.warning('DadJokes is now listening on port 8888...')
