@@ -4,6 +4,9 @@ import requests
 import logging
 import re
 import random
+import redis
+import json
+
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
@@ -63,20 +66,32 @@ class ListHandler(tornado.web.RequestHandler):
 class JokeMakerHandler(tornado.web.RequestHandler):
 
     def get(self):
-        self.jokes = self.get_list_of_jokes()
+        r = redis.Redis(host='localhost', port=6379)
 
-        self.start_words, self.end_words = self.get_beginning_and_end_words(self.jokes)
+        # If a markov map exists in the cache, snag data from redis
+        if r.exists('markov_map'):
+            self.markov_map = json.loads(r.get('markov_map'))
+            self.start_words = json.loads(r.get('start_words'))
+            self.end_words = json.loads(r.get('end_words'))
 
-        markov_map = self.find_markov_choices(self.jokes)
+        # if it doesn't, build the markov map and other data, and stash it in redis for later
+        else:
+            self.jokes = self.get_list_of_jokes()
+            r.set('joke_list', json.dumps(self.jokes))
 
-        new_joke = self.build_joke(markov_map)
+            self.start_words, self.end_words = self.get_beginning_and_end_words(self.jokes)
+            r.set('start_words', json.dumps(self.start_words))
+            r.set('end_words', json.dumps(self.end_words))
+
+            self.markov_map = self.find_markov_choices(self.jokes)
+            r.set('markov_map', json.dumps(self.markov_map))
+
+        new_joke = self.build_joke(self.markov_map)
 
         self.render('joke.html', title="All the Dad Jokes!", joke=new_joke)
 
 
     def find_markov_choices(self, joke_list):
-
-        # self.render('list.html', title="Woo Dad Jokes!", items=joke_list)
 
         # split jokes into individual words
         words = []
@@ -84,18 +99,19 @@ class JokeMakerHandler(tornado.web.RequestHandler):
             words += joke.split()
 
         # get all the end of sentence words
-        end_words = []
         index = 0
+        trimmed_words = []
+
         for word in words:
             if word[-1] in ['.', '!', '?']:
                 words.insert(index + 1, 'blerp')
-                if word != '.':
-                    end_words.append(word)
             index += 1
-
-        trimmed_words = []
-        for word in words:
             trimmed_words.append(re.sub(r'[^\w\s]', '', word))
+            print(trimmed_words)
+
+        #
+        # for word in words:
+        #     trimmed_words.append(re.sub(r'[^\w\s]', '', word))
 
         # create a dict with unique keys mapped to a list of choices
         word_map = dict.fromkeys(trimmed_words, [])
